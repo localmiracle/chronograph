@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	chronopkg "github.com/localmiracle/chronograph"
+	chronopkg "github.com/localmiracle/chronograph/chronograph"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +21,8 @@ func main() {
 		Short: "CLI для ChronoGraph",
 		Run:   run,
 	}
-	root.Flags().DurationVarP(&threshold, "threshold", "t", 1*time.Millisecond, "порог")
-	root.Flags().StringVarP(&output, "output", "o", "pruned.dot", "DOT-файл")
+	root.Flags().DurationVarP(&threshold, "threshold", "t", 1*time.Millisecond, "порог фильтрации")
+	root.Flags().StringVarP(&output, "output", "o", "pruned.dot", "файл DOT-экспорта")
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -52,7 +52,12 @@ func run(cmd *cobra.Command, args []string) {
 
 	pruned := chronopkg.PrunedGraph(records, threshold)
 	fmt.Printf("\nPruned graph: nodes=%d, edges=%d\n", pruned.Nodes().Len(), pruned.Edges().Len())
-	f, _ := os.Create(output)
+
+	f, err := os.Create(output)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	defer f.Close()
 	f.WriteString("digraph ChronoGraph {\n")
 	for it := pruned.Nodes(); it.Next(); {

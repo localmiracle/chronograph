@@ -7,14 +7,14 @@ import (
 	"gonum.org/v1/gonum/graph/simple"
 )
 
-// EventCollector хранит стек активных span’ов и все события
+// EventCollector собирает SpanEvent и строит DAG
 type EventCollector struct {
 	mu     sync.Mutex
-	stack  []uuid.UUID // стек идентификаторов активных span’ов
-	events []SpanEvent // все полученные события
+	stack  []uuid.UUID
+	events []SpanEvent
 }
 
-// NewCollector создаёт новый EventCollector
+// NewCollector создаёт новый
 func NewCollector() *EventCollector {
 	return &EventCollector{
 		stack:  make([]uuid.UUID, 0),
@@ -22,7 +22,7 @@ func NewCollector() *EventCollector {
 	}
 }
 
-// CurrentSpan возвращает ID активного span или nil
+// CurrentSpan возвращает active span ID или nil
 func (c *EventCollector) CurrentSpan() *uuid.UUID {
 	if len(c.stack) == 0 {
 		return nil
@@ -34,12 +34,11 @@ func (c *EventCollector) CurrentSpan() *uuid.UUID {
 func (c *EventCollector) Push(e SpanEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if isEnter(e) {
+	if IsEnter(e) {
 		c.stack = append(c.stack, e.ID)
-	} else if isExit(e) {
+	} else if IsExit(e) {
 		if len(c.stack) == 0 {
-			panic("chronograph: Exit без соответствующего Enter")
+			panic("chronograph: Exit без Enter")
 		}
 		c.stack = c.stack[:len(c.stack)-1]
 	}
@@ -50,32 +49,27 @@ func (c *EventCollector) Push(e SpanEvent) {
 func (c *EventCollector) Events() []SpanEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	copyEvents := make([]SpanEvent, len(c.events))
-	copy(copyEvents, c.events)
-	return copyEvents
+	cp := make([]SpanEvent, len(c.events))
+	copy(cp, c.events)
+	return cp
 }
 
-// BuildGraph строит направленный граф (DAG) из всех span-событий
+// BuildGraph строит DirectedGraph span-эвентов
 func (c *EventCollector) BuildGraph() *simple.DirectedGraph {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	g := simple.NewDirectedGraph()
-
-	// Добавляем все события как узлы
 	for _, e := range c.events {
 		node := simple.Node(e.ID.ID())
 		if g.Node(node.ID()) == nil {
 			g.AddNode(node)
 		}
 	}
-
-	// Добавляем ребра: parent → child
 	for _, e := range c.events {
 		if e.ParentID != nil {
-			parentNode := simple.Node(e.ParentID.ID())
-			childNode := simple.Node(e.ID.ID())
-			g.SetEdge(g.NewEdge(parentNode, childNode))
+			parent := simple.Node(e.ParentID.ID())
+			child := simple.Node(e.ID.ID())
+			g.SetEdge(g.NewEdge(parent, child))
 		}
 	}
 	return g

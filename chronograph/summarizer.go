@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	logic "github.com/localmiracle/chronograph/internal/chronographlogic"
 	"gonum.org/v1/gonum/graph/simple"
 )
 
+// SpanRecord — span с рассчитанной длительностью
 type SpanRecord struct {
 	ID        uuid.UUID
 	ParentID  *uuid.UUID
@@ -19,17 +19,18 @@ type SpanRecord struct {
 	Duration  time.Duration
 }
 
-func BuildRecords(events []logic.SpanEvent) ([]SpanRecord, error) {
+// BuildRecords конвертирует SpanEvent → SpanRecord
+func BuildRecords(events []SpanEvent) ([]SpanRecord, error) {
 	recMap := make(map[uuid.UUID]*SpanRecord)
 	for _, e := range events {
-		if logic.IsEnter(e) {
+		if IsEnter(e) {
 			recMap[e.ID] = &SpanRecord{
 				ID:        e.ID,
 				ParentID:  e.ParentID,
 				Name:      e.Name[:len(e.Name)-6],
 				StartTime: e.Timestamp,
 			}
-		} else if logic.IsExit(e) {
+		} else if IsExit(e) {
 			if e.ParentID == nil {
 				continue
 			}
@@ -47,6 +48,7 @@ func BuildRecords(events []logic.SpanEvent) ([]SpanRecord, error) {
 	return out, nil
 }
 
+// Summarize фильтрует и сортирует records по порогу
 func Summarize(records []SpanRecord, threshold time.Duration) []SpanRecord {
 	var out []SpanRecord
 	for _, r := range records {
@@ -60,16 +62,18 @@ func Summarize(records []SpanRecord, threshold time.Duration) []SpanRecord {
 	return out
 }
 
+// PrintSummary выводит табличку записей
 func PrintSummary(records []SpanRecord) {
-	fmt.Println("Сводка спанов (>= порог):")
+	fmt.Println("Сводка спанов:")
 	fmt.Printf("%-36s %-20s %-10s\n", "ID", "Name", "Duration")
 	for _, r := range records {
 		fmt.Printf("%-36s %-20s %v\n", r.ID, r.Name, r.Duration)
 	}
 }
 
+// PrunedGraph строит «сжатый» граф span’ов >= порога
 func PrunedGraph(records []SpanRecord, threshold time.Duration) *simple.DirectedGraph {
-	recMap := make(map[uuid.UUID]SpanRecord, len(records))
+	recMap := make(map[uuid.UUID]SpanRecord)
 	for _, r := range records {
 		recMap[r.ID] = r
 	}
@@ -100,8 +104,9 @@ func PrunedGraph(records []SpanRecord, threshold time.Duration) *simple.Directed
 	return g
 }
 
+// InferRootCause возвращает цепочку от rootName до самого долгого span
 func InferRootCause(records []SpanRecord, rootName string) []SpanRecord {
-	recMap := make(map[uuid.UUID]SpanRecord, len(records))
+	recMap := make(map[uuid.UUID]SpanRecord)
 	for _, r := range records {
 		recMap[r.ID] = r
 	}
@@ -130,6 +135,7 @@ func InferRootCause(records []SpanRecord, rootName string) []SpanRecord {
 	return path
 }
 
+// PrintRootCause выводит найденную цепочку
 func PrintRootCause(chain []SpanRecord) {
 	if len(chain) == 0 {
 		fmt.Println("Root cause not found")

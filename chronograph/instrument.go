@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	logic "github.com/localmiracle/chronograph/internal/chronographlogic"
 )
 
 type ctxKey string
@@ -14,37 +13,36 @@ const (
 	spanKey      ctxKey = "chronograph-span"
 )
 
-func NewCollector() *logic.EventCollector {
-	return logic.NewCollector()
-}
-
-func ContextWithCollector(ctx context.Context, col *logic.EventCollector) context.Context {
+// ContextWithCollector встраивает Collector в контекст
+func ContextWithCollector(ctx context.Context, col *EventCollector) context.Context {
 	return context.WithValue(ctx, collectorKey, col)
 }
 
-func getCollector(ctx context.Context) *logic.EventCollector {
+func getCollector(ctx context.Context) *EventCollector {
 	v := ctx.Value(collectorKey)
-	if col, ok := v.(*logic.EventCollector); ok {
+	if col, ok := v.(*EventCollector); ok {
 		return col
 	}
-	panic("chronograph: EventCollector not found")
+	panic("chronograph: Collector не найден в контексте")
 }
 
+// StartSpan создаёт событие enter и возвращает context с текущим span ID
 func StartSpan(ctx context.Context, name string) (context.Context, uuid.UUID) {
 	col := getCollector(ctx)
 	parent := col.CurrentSpan()
-	enter := logic.NewEnter(name, parent)
+	enter := NewEnter(name, parent)
 	col.Push(enter)
 	return context.WithValue(ctx, spanKey, enter.ID), enter.ID
 }
 
+// EndSpan создаёт событие exit, беря span ID из context
 func EndSpan(ctx context.Context, name string) {
 	col := getCollector(ctx)
 	v := ctx.Value(spanKey)
 	id, ok := v.(uuid.UUID)
 	if !ok {
-		panic("chronograph: EndSpan without StartSpan")
+		panic("chronograph: EndSpan без StartSpan")
 	}
-	exit := logic.NewExit(name, id)
+	exit := NewExit(name, id)
 	col.Push(exit)
 }
