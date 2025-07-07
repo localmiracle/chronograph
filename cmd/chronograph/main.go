@@ -6,7 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/localmiracle/chronograph"
+	"chronograph"
+
 	"github.com/spf13/cobra"
 )
 
