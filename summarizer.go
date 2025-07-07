@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	logic "github.com/localmiracle/chronograph/internal/chronographlogic"
 	"gonum.org/v1/gonum/graph/simple"
 )
 
-// SpanRecord — завершённый span с длительностью
 type SpanRecord struct {
 	ID        uuid.UUID
 	ParentID  *uuid.UUID
@@ -19,18 +19,17 @@ type SpanRecord struct {
 	Duration  time.Duration
 }
 
-// BuildRecords преобразует SpanEvent → SpanRecord
-func BuildRecords(events []SpanEvent) ([]SpanRecord, error) {
+func BuildRecords(events []logic.SpanEvent) ([]SpanRecord, error) {
 	recMap := make(map[uuid.UUID]*SpanRecord)
 	for _, e := range events {
-		if isEnter(e) {
+		if logic.IsEnter(e) {
 			recMap[e.ID] = &SpanRecord{
 				ID:        e.ID,
 				ParentID:  e.ParentID,
-				Name:      e.Name[:len(e.Name)-6], // убираем суффикс ".enter"
+				Name:      e.Name[:len(e.Name)-6],
 				StartTime: e.Timestamp,
 			}
-		} else if isExit(e) {
+		} else if logic.IsExit(e) {
 			if e.ParentID == nil {
 				continue
 			}
@@ -41,16 +40,13 @@ func BuildRecords(events []SpanEvent) ([]SpanRecord, error) {
 			}
 		}
 	}
-
-	// в слайс
-	records := make([]SpanRecord, 0, len(recMap))
+	out := make([]SpanRecord, 0, len(recMap))
 	for _, r := range recMap {
-		records = append(records, *r)
+		out = append(out, *r)
 	}
-	return records, nil
+	return out, nil
 }
 
-// Summarize фильтрует и сортирует по длительности
 func Summarize(records []SpanRecord, threshold time.Duration) []SpanRecord {
 	var out []SpanRecord
 	for _, r := range records {
@@ -64,24 +60,19 @@ func Summarize(records []SpanRecord, threshold time.Duration) []SpanRecord {
 	return out
 }
 
-// PrintSummary выводит таблицу результатов
 func PrintSummary(records []SpanRecord) {
-	fmt.Println("Сводка спанов (длительность >= порог):")
+	fmt.Println("Сводка спанов (>= порог):")
 	fmt.Printf("%-36s %-20s %-10s\n", "ID", "Name", "Duration")
 	for _, r := range records {
 		fmt.Printf("%-36s %-20s %v\n", r.ID, r.Name, r.Duration)
 	}
 }
 
-// PrunedGraph строит «сжатый» граф: оставляет только span’ы с Duration>=threshold,
-// а узлы меньшей длительности удаляет, но «напрямую» соединяет их ближайших kept-родителей с потомками.
 func PrunedGraph(records []SpanRecord, threshold time.Duration) *simple.DirectedGraph {
-	// соберём map всех записей по ID
 	recMap := make(map[uuid.UUID]SpanRecord, len(records))
 	for _, r := range records {
 		recMap[r.ID] = r
 	}
-	// выберем span’ы >= threshold
 	kept := make(map[uuid.UUID]SpanRecord)
 	for _, r := range records {
 		if r.Duration >= threshold {
@@ -89,15 +80,13 @@ func PrunedGraph(records []SpanRecord, threshold time.Duration) *simple.Directed
 		}
 	}
 	g := simple.NewDirectedGraph()
-	// добавим все «kept» узлы
 	for id := range kept {
 		g.AddNode(simple.Node(id.ID()))
 	}
-	// для каждого kept-узла найдём ближайшего kept-предка и свяжем
 	for id, r := range kept {
-		parentID := r.ParentID
-		for parentID != nil {
-			pr := recMap[*parentID]
+		parent := r.ParentID
+		for parent != nil {
+			pr := recMap[*parent]
 			if pr.Duration >= threshold {
 				g.SetEdge(g.NewEdge(
 					simple.Node(pr.ID.ID()),
@@ -105,21 +94,17 @@ func PrunedGraph(records []SpanRecord, threshold time.Duration) *simple.Directed
 				))
 				break
 			}
-			parentID = pr.ParentID
+			parent = pr.ParentID
 		}
 	}
 	return g
 }
 
-// InferRootCause возвращает цепочку span’ов от корневого (rootName) до
-// наиболее долгого span’а (кроме самого root), считая, что самый
-// проблемный — с наибольшей Duration.
 func InferRootCause(records []SpanRecord, rootName string) []SpanRecord {
 	recMap := make(map[uuid.UUID]SpanRecord, len(records))
 	for _, r := range records {
 		recMap[r.ID] = r
 	}
-	// кандидаты — все, кроме rootName
 	var cands []SpanRecord
 	for _, r := range records {
 		if r.Name != rootName {
@@ -129,25 +114,22 @@ func InferRootCause(records []SpanRecord, rootName string) []SpanRecord {
 	if len(cands) == 0 {
 		return nil
 	}
-	// самый долгий
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].Duration > cands[j].Duration
 	})
 	culprit := cands[0]
-	// строим путь от root до culprit
-	var chain []SpanRecord
+	var path []SpanRecord
 	cur := culprit
 	for {
-		chain = append([]SpanRecord{cur}, chain...)
+		path = append([]SpanRecord{cur}, path...)
 		if cur.Name == rootName || cur.ParentID == nil {
 			break
 		}
 		cur = recMap[*cur.ParentID]
 	}
-	return chain
+	return path
 }
 
-// PrintRootCause выводит найденную цепочку «корня зла»
 func PrintRootCause(chain []SpanRecord) {
 	if len(chain) == 0 {
 		fmt.Println("Root cause not found")

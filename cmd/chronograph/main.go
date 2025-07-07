@@ -6,8 +6,7 @@ import (
 	"os"
 	"time"
 
-	"chronograph"
-
+	chronopkg "github.com/localmiracle/chronograph"
 	"github.com/spf13/cobra"
 )
 
@@ -17,86 +16,69 @@ var (
 )
 
 func main() {
-	rootCmd := &cobra.Command{
+	root := &cobra.Command{
 		Use:   "chronograph",
-		Short: "ChronoGraph CLI — отладка распределённых трасс",
-		Run:   runCmd,
+		Short: "CLI для ChronoGraph",
+		Run:   run,
 	}
+	root.Flags().DurationVarP(&threshold, "threshold", "t", 1*time.Millisecond, "порог")
+	root.Flags().StringVarP(&output, "output", "o", "pruned.dot", "DOT-файл")
 
-	rootCmd.Flags().DurationVarP(&threshold, "threshold", "t", 1*time.Millisecond,
-		"Порог фильтрации спанов (например 500µs, 2ms)")
-	rootCmd.Flags().StringVarP(&output, "output", "o", "graph.dot",
-		"Файл для экспорта сжатого графа в DOT-формате")
-
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func runCmd(cmd *cobra.Command, args []string) {
-	// 1. Инициализация коллектор + контекст
-	col := chronograph.NewCollector()
-	ctx := chronograph.ContextWithCollector(context.Background(), col)
+func run(cmd *cobra.Command, args []string) {
+	col := chronopkg.NewCollector()
+	ctx := chronopkg.ContextWithCollector(context.Background(), col)
 
-	// 2. Запускаем главный span и эмулируем работу
-	ctx, _ = chronograph.StartSpan(ctx, "main")
+	ctx, _ = chronopkg.StartSpan(ctx, "main")
 	step1(ctx)
 	step2(ctx)
-	chronograph.EndSpan(ctx, "main")
+	chronopkg.EndSpan(ctx, "main")
 
-	// 3. Собираем записи
 	events := col.Events()
-	records, err := chronograph.BuildRecords(events)
+	records, err := chronopkg.BuildRecords(events)
 	if err != nil {
-		fmt.Println("Ошибка:", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	// 4. Summary
 	fmt.Println("=== Summary ===")
-	summary := chronograph.Summarize(records, threshold)
-	chronograph.PrintSummary(summary)
+	summary := chronopkg.Summarize(records, threshold)
+	chronopkg.PrintSummary(summary)
 
-	// 5. Pruned graph + экспорт DOT
-	pruned := chronograph.PrunedGraph(records, threshold)
-	fmt.Printf("\nPruned graph: nodes=%d, edges=%d\n",
-		pruned.Nodes().Len(), pruned.Edges().Len(),
-	)
-
-	f, err := os.Create(output)
-	if err != nil {
-		fmt.Println("Не удалось создать файл:", err)
-		os.Exit(1)
-	}
+	pruned := chronopkg.PrunedGraph(records, threshold)
+	fmt.Printf("\nPruned graph: nodes=%d, edges=%d\n", pruned.Nodes().Len(), pruned.Edges().Len())
+	f, _ := os.Create(output)
 	defer f.Close()
-
 	f.WriteString("digraph ChronoGraph {\n")
 	for it := pruned.Nodes(); it.Next(); {
 		n := it.Node()
-		fmt.Fprintf(f, "  \"%d\";\n", n.ID())
+		fmt.Fprintf(f, " \"%d\";\n", n.ID())
 	}
 	for it := pruned.Edges(); it.Next(); {
 		e := it.Edge()
-		fmt.Fprintf(f, "  \"%d\" -> \"%d\";\n", e.From().ID(), e.To().ID())
+		fmt.Fprintf(f, " \"%d\" -> \"%d\";\n", e.From().ID(), e.To().ID())
 	}
 	f.WriteString("}\n")
-	fmt.Println("DOT сохранён в", output)
+	fmt.Println("DOT saved to", output)
 
-	// 6. Root cause
 	fmt.Println("\n=== Root Cause ===")
-	chain := chronograph.InferRootCause(records, "main")
-	chronograph.PrintRootCause(chain)
+	chain := chronopkg.InferRootCause(records, "main")
+	chronopkg.PrintRootCause(chain)
 }
 
 func step1(ctx context.Context) {
-	ctx, _ = chronograph.StartSpan(ctx, "step1")
+	ctx, _ = chronopkg.StartSpan(ctx, "step1")
 	time.Sleep(5 * time.Millisecond)
-	chronograph.EndSpan(ctx, "step1")
+	chronopkg.EndSpan(ctx, "step1")
 }
 
 func step2(ctx context.Context) {
-	ctx, _ = chronograph.StartSpan(ctx, "step2")
+	ctx, _ = chronopkg.StartSpan(ctx, "step2")
 	time.Sleep(500 * time.Microsecond)
-	chronograph.EndSpan(ctx, "step2")
+	chronopkg.EndSpan(ctx, "step2")
 }
